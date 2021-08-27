@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
 
 // https://stackoverflow.com/a/31129967
@@ -52,26 +52,53 @@ type HsStock struct {
 	ErrorCode int
 }
 
+var stock_key = os.Getenv("STOCK_KEY")
+
+func getHsStock(gid string) (HsStock, error) {
+	hsStock := HsStock{}
+	err := getJson("http://web.juhe.cn:8080/finance/stock/hs?gid="+
+		gid+"&key="+stock_key, &hsStock)
+	return hsStock, err
+}
+
 func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
 		log.Fatal("$PORT must be set")
 	}
-	stock_key := os.Getenv("STOCK_KEY")
+	tgPath := os.Getenv("TELEGRAM_PATH")
+	if tgPath == "" {
+		log.Fatal("$TELEGRAM_PATH must be set")
+	}
 	if stock_key == "" {
 		log.Fatal("$STOCK_KEY must be set")
 	}
-	r := gin.Default()
-	r.GET("/hs", func(c *gin.Context) {
-		gid := c.Query("gid")
-		hsStock := HsStock{}
-		if err := getJson("http://web.juhe.cn:8080/finance/stock/hs?gid="+
-			gid+"&key="+stock_key, &hsStock); err != nil {
-			c.String(http.StatusBadGateway, err.Error())
-		} else {
-			c.JSON(http.StatusOK, hsStock)
-		}
-
-	})
-	r.Run(":" + port)
+	bot, err := tgbotapi.NewBotAPIWithClient(
+		os.Getenv("TELEGRAM_APITOKEN"),
+		myClient)
+	if err != nil {
+		log.Fatal(err)
+	}
+	bot.Debug = true
+	log.Printf("Authorized on account %s", bot.Self.UserName)
+	webhook := tgbotapi.NewWebhook("https://iflag.herokuapp.com/" + tgPath)
+	webhook.MaxConnections = 100
+	if _, err := bot.SetWebhook(webhook); err != nil {
+		log.Fatal(err)
+	}
+	info, err := bot.GetWebhookInfo()
+	if err != nil {
+		log.Fatal(err)
+	}
+	if info.LastErrorDate != 0 {
+		log.Printf("Telegram callback failed: %s", info.LastErrorMessage)
+	}
+	updates := bot.ListenForWebhook("/" + tgPath)
+	go http.ListenAndServe(":"+port, nil)
+	for update := range updates {
+		log.Printf("[%s] %s", update.Message.From.UserName, update.Message.Text)
+		msg := tgbotapi.NewMessage(update.Message.Chat.ID, update.Message.Text)
+		msg.ReplyToMessageID = update.Message.MessageID
+		bot.Send(msg)
+	}
 }
