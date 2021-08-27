@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -97,7 +98,20 @@ func main() {
 	go http.ListenAndServe(":"+port, nil)
 	for update := range updates {
 		log.Printf("[%s] %s", update.Message.From.UserName, update.Message.Text)
-		msg := tgbotapi.NewMessage(update.Message.Chat.ID, update.Message.Text)
+		msg := tgbotapi.NewMessage(update.Message.Chat.ID,
+			"使用方法：/hs 股票代码")
+		if update.Message.IsCommand() {
+			switch update.Message.Command() {
+			case "hs":
+				gid := update.Message.CommandArguments()
+				hsStock, err := getHsStock(gid)
+				if err != nil {
+					msg.Text = err.Error()
+				} else {
+					msg.Text = fmt.Sprintf("%v", hsStock)
+				}
+			}
+		}
 		msg.ReplyToMessageID = update.Message.MessageID
 		bot.Send(msg)
 	}
