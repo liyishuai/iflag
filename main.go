@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -62,6 +61,22 @@ func getHsStock(gid string) (HsStock, error) {
 	return hsStock, err
 }
 
+type HsIndex struct {
+	ErrorCode int
+	Reason    string
+	Result    struct {
+		DealNum, DealPri, HighPri, IncrePer, Increase, LowPri,
+		Name, NowPri, OpenPri, Time, YesPri string
+	}
+}
+
+func getHsIndex(indexType string) (HsIndex, error) {
+	hsIndex := HsIndex{}
+	err := getJson("http://web.juhe.cn:8080/finance/stock/hs?type="+
+		indexType+"&key="+stock_key, &hsIndex)
+	return hsIndex, err
+}
+
 func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -97,22 +112,40 @@ func main() {
 	updates := bot.ListenForWebhook("/" + tgPath)
 	go http.ListenAndServe(":"+port, nil)
 	for update := range updates {
-		log.Printf("[%s] %s", update.Message.From.UserName, update.Message.Text)
-		msg := tgbotapi.NewMessage(update.Message.Chat.ID,
-			"使用方法：/hs 股票代码")
-		if update.Message.IsCommand() {
-			switch update.Message.Command() {
-			case "hs":
-				gid := update.Message.CommandArguments()
-				hsStock, err := getHsStock(gid)
-				if err != nil {
-					msg.Text = err.Error()
-				} else {
-					msg.Text = fmt.Sprintf("%v", hsStock)
+		go func(update tgbotapi.Update) {
+			log.Printf("[%s] %s", update.Message.From.UserName,
+				update.Message.Text)
+			msg := tgbotapi.NewMessage(update.Message.Chat.ID,
+				"*使用方法：*\n/hs 股票代码\n/hsIndex 指数代码")
+			msg.ParseMode = "MarkdownV2"
+			if update.Message.IsCommand() {
+				switch update.Message.Command() {
+				case "hs":
+					gid := update.Message.CommandArguments()
+					hsStock, err := getHsStock(gid)
+					if err != nil {
+						msg.Text = err.Error()
+					} else if bytes, err :=
+						json.MarshalIndent(hsStock, "", " "); err != nil {
+						msg.Text = err.Error()
+					} else {
+						msg.Text = "```json\n" + string(bytes) + "\n```"
+					}
+				case "hsIndex":
+					indexType := update.Message.CommandArguments()
+					hsIndex, err := getHsIndex(indexType)
+					if err != nil {
+						msg.Text = err.Error()
+					} else if bytes, err :=
+						json.MarshalIndent(hsIndex, "", " "); err != nil {
+						msg.Text = err.Error()
+					} else {
+						msg.Text = "```json\n" + string(bytes) + "\n```"
+					}
 				}
 			}
-		}
-		msg.ReplyToMessageID = update.Message.MessageID
-		bot.Send(msg)
+			msg.ReplyToMessageID = update.Message.MessageID
+			bot.Send(msg)
+		}(update)
 	}
 }
